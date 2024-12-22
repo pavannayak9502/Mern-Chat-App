@@ -1,0 +1,44 @@
+Create an backend first
+
+1. npm init => give title: talk-a-tive, author:pavan, instead of index file give server.js;
+
+2. Install express(npm i express) then create an instance of express as ( const app = express() );
+
+3. Install dotenv (npm i dotenv) then creare an instance of dotenv as ( dotenv.config ).
+
+4. Create a normal server (app.get("/", (req, res)=> {res.send("Hello world!")})) to check weather our backend working properly. 
+
+/*  After creating the backend server then create frontend part */
+
+5. Install react app => npm create-react-app frontend
+
+6. Clear all react loading files after that create your main frontend files.
+
+7. After clearing the static and src files then install chakra-ui package.
+
+8. Some version issuses install the latest version of chakra-ui.
+
+9. npm i @chakra-ui/react @emotion/react @emotion/styled framer-motion --installs the latest version
+
+10. npm install @chakra-ui/react@2 - downgrades it to version 2.
+
+11. At frontend floder => index.js file wrap you application with the setup the provider, check the server(npm start) : 
+import React from "react";
+import ReactDOM from "react-dom/client";
+import "./index.css";
+import App from "./App";
+
+import { ChakraProvider } from "@chakra-ui/react";
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(
+  <ChakraProvider>
+    <App />
+  </ChakraProvider>
+);
+
+12. After wraping the application, connect the api calls from frontend to backend.
+
+13. Open package.json after property "private": "true", connect the proxy server property =>  "proxy": "http://127.0.0.1:5000", check the server("npm start").
+
+14.   

@@ -1,0 +1,371 @@
+import React, { useState, useEffect } from "react";
+import { ChatState } from "../Context/ChatProvider";
+import {
+  Box,
+  Center,
+  FormControl,
+  Input,
+  Spinner,
+  Text,
+  useToast,
+} from "@chakra-ui/react";
+import { IconButton, ArrowBackIcon } from "@chakra-ui/icons";
+import { getSender, getSenderFull } from "../config/ChatLogics.js";
+import ProfileModal from "../components/miscellaneous/ProfileModal.js";
+import UpdateGroupChatModal from "./miscellaneous/UpdateGroupChatModal.js";
+import axios from "axios";
+import "./styles.css";
+import ScrollableChat from "./ScrollableChat.js";
+import Lottie from "react-lottie";
+import animationData from "../animations/typing.json";
+
+import io from "socket.io-client";
+const ENDPOINT = "http://localhost:5000"; //This variable(ENDPOINT) having the url of localhost for using the socket(real-time communication).
+var socket, selectedChatCompare;
+
+const SingleChat = ({ fetchAgain, setFetchAgain }) => {
+  const [messages, setMessages] = useState([]); //The below three states are for sending messages state(messages, loading, newMessage).
+  const [loadingChat, setLoadingChat] = useState(false);
+  const [newMessage, setNewMessage] = useState("");
+  const [socketConnected, setSocketConnected] = useState(false);
+
+  //The both typing and isTyping states for displaying that user is something in the chat.
+  const [typing, setTyping] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+
+  const { user, selectedChat, setSelectedChat, notification, setNotification } =
+    ChatState();
+  const toast = useToast();
+
+  //Logic for typing indicator for chat room.
+  const defaultOptions = {
+    loop: true,
+    autoplay: true,
+    animationData: animationData,
+    renderSettings: {
+      preserveAspectRatio: "xMidYMid slice",
+    },
+  };
+
+  //This useEffect state is for rendering the chats for user.
+  useEffect(() => {
+    fetchMessages();
+
+    selectedChatCompare = selectedChat;
+  }, [selectedChat]);
+
+  //This useEFfect state is for rendering the socket.
+  useEffect(() => {
+    socket = io(ENDPOINT);
+    socket.emit("setup", user);
+    socket.on("connected", () => {
+      setSocketConnected(true);
+    });
+
+    socket.on("typing", () => setIsTyping(true));
+    socket.on("stop typing", () => setIsTyping(false));
+  }, []);
+
+  //For sending the message to the user.
+  const sendMessage = async (event) => {
+    if (event.key === "Enter" && newMessage) {
+      //If user typed a message and clicked on enter button then send the message to the another user(receiver). This sendMessage function is only useful for laptop users.
+      socket.emit("stop typing", selectedChat._id);
+
+      try {
+        const config = {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${user.token}`,
+          },
+        };
+
+        setNewMessage(""); //Before going to our api call(post req) keeping the setNewMessage state into empty.
+        const { data } = await axios.post(
+          "/api/message",
+          {
+            //Using post request we are sending the message and chatId of that selected user to our backend server to store the message data in our database.
+            content: newMessage,
+            chatId: selectedChat._id,
+          },
+          config
+        );
+
+        socket.emit("new message", data);
+        setMessages([...messages, data]); //Again we are passing all of the previous messges into our setMessage state using spread operator and then we also adding the new message(data) into our messages array.
+      } catch (error) {
+        toast({
+          title: "Error Occured!",
+          description: "Failed to send the Message!",
+          status: "error",
+          duration: 3000,
+          isClosable: true,
+          position: "bottom",
+        });
+        return;
+      }
+    }
+  };
+
+  //Typing Indicator logic.
+  const typingHandler = (e) => {
+    setNewMessage(e.target.value);
+
+    if (!socketConnected) {
+      //If socket not connected in that room then return from there.
+      return;
+    }
+
+    if (!typing) {
+      //If typing true then display the typing indicator for that chat room.
+      setTyping(true);
+      socket.emit("typing", selectedChat._id);
+    }
+
+    //This logic for display to stop showing the indicator for that chat room.
+    let lastTypingTime = new Date().getTime();
+    var timerLength = 3000;
+    setTimeout(() => {
+      var timeNow = new Date().getTime();
+      var timeDiff = timeNow - lastTypingTime; //Storing time differences form present time - lastTypingTime.
+
+      if (timeDiff >= timerLength && typing) {
+        //If user typing more than 3 seconds in the room and still typing the message then stop showing the typing indicator.
+        socket.emit("stop typing", selectedChat._id);
+        setTyping(false);
+      }
+    }, timerLength);
+  };
+
+  //For fetching messges to thier particular selected user.
+  const fetchMessages = async () => {
+    if (!selectedChat) {
+      //If no chat messages means just return.
+      return;
+    }
+
+    try {
+      //To fetch all the chat messages for that particular user from the database.
+      const config = {
+        headers: {
+          Authorization: `Bearer ${user.token}`,
+        },
+      };
+
+      const { data } = await axios.get(
+        `/api/message/${selectedChat._id}`,
+        config
+      );
+
+      setMessages(data);
+      setLoadingChat(false);
+
+      socket.emit("join chat", selectedChat._id);
+    } catch (error) {
+      toast({
+        title: "Error Occured!",
+        description: "Failed to Load the Message.",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+        position: "bottom",
+      });
+      return;
+    }
+  };
+
+  //This useEffects state is for receiving the new messages and also for notification.
+  useEffect(() => {
+    socket.on("message recieved", (newMessageRecieved) => {
+      if (
+        !selectedChatCompare || //The logic for the if condition was => if the user not active in the current chat or his active with another chat person then send notification to the user.(Meaning that he recieved a new message from an another sender).
+        selectedChatCompare._id !== newMessageRecieved.chat._id
+      ) {
+        //give notification if user was not in room or active with another person in differnt room.
+        if (!notification.includes(newMessageRecieved)) {
+          //Another if condition in main if condition. If new message does not includes in notification array means we had too pass the new messages in the setNotifications array and also adding the spread operator for remaining notifications if was not in the same room or busy with another person.
+          setNotification([newMessageRecieved, ...notification]);
+          setFetchAgain(!fetchAgain); //Fetch the chats again.
+        }
+      } else {
+        //If user was active in current chat which message send by same room id member then don't display the notificaion. Just the pass the new message direct into users chat same room array(1:1).
+        setMessages([...messages, newMessageRecieved]);
+      }
+    });
+  });
+
+  return (
+    <>
+      {
+        //If selected chat was true then display the chat of that user else display Click on user to start chatting.
+        selectedChat ? (
+          <>
+            <Text //If there was a selected chat means display this box and text for user to chat with them.
+              fontSize={{ base: "28px", md: "30px" }}
+              paddingBottom={3}
+              px={2}
+              width="100%"
+              fontFamily="Work sans"
+              display="flex"
+              justifyContent={{ base: "space-between" }}
+              alignItems="center"
+            >
+              <IconButton //Display icon button for only smaller screens(mobiles) not for bigger screens(tab, laptop).
+                display={{ base: "flex", md: "none" }}
+                icon={<ArrowBackIcon />}
+                onClick={() => setSelectedChat("")} //When we are clicking on back arrow icon button our setSelectedChat state variable convert into empty chat and it thorw was to back page.
+              />
+              {
+                //If selected chat was not group chat means display single user chat else display group chat with eye icon button features too.
+                !selectedChat.isGroupChat ? (
+                  <>
+                    {
+                      getSender(user, selectedChat.users) //Display the name of the sender for the selected chat user in that chatting user window, we took the logic from floder config => chatLogics.js file (to display the selected chat sender user name.) and we passed two parameters(user, selectedChat.users). Where user is current logged user and selectedChat.users means sender users id(name of that user).
+                    }
+                    <ProfileModal //Calling profileModal from folder miscellaneous => profileModal.js file in that file we already passed childern to supply  and display the profile information or else display eye icon. To display the user name and email and user picture we passing and calling the logic from config folder => ChatLogic.js file(line number: 8).
+                      user={getSenderFull(user, selectedChat.users)}
+                    />
+                  </>
+                ) : (
+                  <>
+                    {/* If its a group chat then display the group name for both smaller screeen and for bigger screens.*/}
+                    {selectedChat.chatName.toUpperCase()}
+
+                    <UpdateGroupChatModal
+                      fetchAgain={fetchAgain}
+                      setFetchAgain={setFetchAgain}
+                      fetchMessages={fetchMessages}
+                    />
+                  </>
+                )
+              }
+            </Text>
+            <Box
+              display="flex"
+              flexDirection="column"
+              justifyContent="flex-end"
+              padding={3}
+              background="#E8E8E8"
+              width="100%"
+              height="100%"
+              borderRadius="lg"
+              overflow="hidden"
+            >
+              {/* Sending the messages Here*/}
+              {loadingChat ? (
+                <Spinner
+                  size="xl"
+                  width={20}
+                  heigth={20}
+                  alignSelf={Center}
+                  margin="auto"
+                />
+              ) : (
+                <div className="messages">
+                  {/* Displaying the Messages for users. But I have create new file(ScroableChat.js) to display each and every chat in it.*/}
+                  <ScrollableChat messages={messages} />
+                </div>
+              )}
+              <FormControl onKeyDown={sendMessage} isRequired marginTop={3}>
+                {/* Displaying the typing indicator 1. First vist lottie files site, then download your typing indicator in format of json. After downloading create an folder animation in your frontend source directory then in that floder create typing.json, after creating the file copy your downloaded file json file data and after paste the data in the typing.json file. */}
+                {/* 2. To display typing indicator the we need to download a package in frontend : npm install react-lottie */}
+                {isTyping ? (
+                  <div>
+                    <Lottie
+                      options={defaultOptions}
+                      width={70}
+                      style={{
+                        marginBottom: 15,
+                        marginLeft: 0,
+                        background: "transparent",
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <></>
+                )}
+
+                <Input
+                  variant="filled"
+                  background="#E0E0E0"
+                  placeholder="Enter a message..."
+                  onChange={typingHandler}
+                  value={newMessage}
+                />
+              </FormControl>
+            </Box>
+          </>
+        ) : (
+          <Box //If there was no selected chat means display this box and text for user(click on a user and chat with them).
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            height="100%"
+            width="100%"
+            background="linear-gradient(to right, #833ab4, #fd1d1d, #fcb045)"
+          >
+            <Text
+              fontSize="5xl"
+              paddingBottom={3}
+              fontFamily="Work sans"
+              color="whiteAlpha.900"
+            >
+              Click on a user to start chatting...
+            </Text>
+          </Box>
+        )
+      }
+    </>
+  );
+};
+
+export default SingleChat;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import React, { useState } from "react";
+import { ChatState } from "../Context/ChatProvider";
+import { Box } from "@chakra-ui/react";
+import SideDrawer from "../components/miscellaneous/SideDrawer";
+import MyChats from "../components/MyChats";
+import ChatBox from "../components/ChatBox";
+
+const ChatPage = () => {
+  const { user } = ChatState();
+  const [fetchAgain, setFetchAgain] = useState(false); //This is for to update the users for single user or group chat users if they exit from group(render them).
+
+  return (
+    <>
+      <div style={{ width: "100%" }}>
+        {user && <SideDrawer />} {/*For search bar.*/}
+        <Box
+          display="flex"
+          justifyContent="space-between"
+          width="100%"
+          height="91.5vh"
+          padding="1rem"
+        >
+          {user && <MyChats fetchAgain={fetchAgain} />}{" "}
+          {/*Left side user & chat window */}
+          {user && (
+            <ChatBox fetchAgain={fetchAgain} setFetchAgain={setFetchAgain} />
+          )}{" "}
+          {/* Right side chatting window */}
+        </Box>
+      </div>
+    </>
+  );
+};
+
+export default ChatPage;
